@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const config = require("./config");
 const connectionString = `mongodb+srv://${config.mongodb.user}:${config.mongodb.password}@${config.mongodb.host}/${config.mongodb.dbName}?retryWrites=true&w=majority`;
-mongoose.set('strictQuery', true); // to suppress DepreciationWarning in logger
+mongoose.set('strictQuery', true);
 
 const connect = () => {
     return mongoose.connect(connectionString)

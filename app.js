@@ -1,16 +1,16 @@
 // const http = require('http');
 const express = require('express');
-const cors = require('cors');
+// const cors = require('cors');
 require('./db.js');
 const app = express();
 const authRoute = require('./routes/authRoute.js');
-const bookRoute = require('./routes/bookRoute.js'); 
+const bookRoute = require('./routes/bookRoute.js');
 
 
 // const homeController = require('./controllers/homeController');
 // const userController = require('./controllers/userController');
 
-app.use(cors());
+// app.use(cors());
 // CORS
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,6 +20,7 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json())
+app.use('/images', express.static('images'))
 app.use('/api/auth', authRoute)
 app.use('/api/books', bookRoute);
 
