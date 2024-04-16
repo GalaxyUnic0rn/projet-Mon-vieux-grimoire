@@ -1,3 +1,5 @@
+const fs = require('fs')
+const average = require('../utils/average');
 const Book = require('../models/book');
 
 const getBooks = (req, res) => {
@@ -22,11 +24,7 @@ const createBook = (req, res) => {
         .catch(error => res.status(400).json({ error }));
 }
 
-const getBestRatedBooks = (req, res) => {
-    Book.find().sort({ averageRating: -1 }).limit(3)
-        .then(books => res.status(200).json(books))
-        .catch(error => res.status(400).json({ error }));
-}
+
 const getBookById = (req, res) => {
     const { id } = req.params;
 
@@ -40,68 +38,105 @@ const getBookById = (req, res) => {
         .catch(error => res.status(400).json({ error }));
 };
 
-const updateBook = (req, res) => {
-    const { id } = req.params;
-    const { title, author, year, genre, rating } = req.body;
-    const bookToUpdate = {};
+const updateBookById = (req, res) => {
+    const bookObject = req.file ? {
+        ...JSON.parse(req.body.book),
+        imageUrl: `${req.protocol}://${req.get('host')}/images/${req.file.filename}`
+    } : { ...req.body };
 
-    if (title) bookToUpdate.title = title;
-    if (author) bookToUpdate.author = author;
-    if (year) bookToUpdate.year = year;
-    if (genre) bookToUpdate.genre = genre;
-    if (rating !== undefined && rating !== null) bookToUpdate.rating = rating;
-    if (req.file) {
-        bookToUpdate.imageUrl = `${req.protocol}://${req.get('host')}/images/${req.file.filename}`;
+    console.log('imageUrl:', bookObject.imageUrl)
+
+    Book.findOne({ _id: req.params.id })
+        .then(book => {
+            if (!book) {
+                return res.status(404).json({ error: new Error("Book not found") });
+            }
+            if (book.userId !== req.auth.userId) {
+                return res.status(403).json({ error: new Error("Unauthorized request") });
+            }
+            if (typeof bookObject.imageUrl === 'undefined') {
+                bookObject.imageUrl = book.imageUrl
+            }
+
+            if (bookObject.imageUrl !== book.imageUrl) {
+                const filename = book.imageUrl.split('/images/')[1]
+                fs.unlink(`./images/${filename}`, (err, info) => console.log(err || info))
+            }
+
+            return Book.updateOne({ _id: req.params.id }, { ...bookObject, _id: req.params.id })
+        })
+        .then(() => res.status(200).json({ message: 'book updated !' }))
+        .catch(error => res.status(400).json({ error }));
+};
+
+
+const deleteBookById = (req, res) => {
+    const { id } = req.params;
+    const userIdFromToken = req.auth.userId;
+
+    Book.findById(id)
+        .then(book => {
+            if (!book) {
+                return res.status(404).json({ error: "Book not found" });
+            }
+            if (book.userId !== userIdFromToken) {
+                return res.status(403).json({ error: "Unauthorized request" });
+            }
+
+            const filename = book.imageUrl.split('/images/')[1]
+            fs.unlink(`./images/${filename}`, (err, info) => {
+                console.log(err || info)
+                Book.findByIdAndDelete(id)
+                    .then(() => res.status(200).json({ message: "Book deleted successfully" }))
+                    .catch(error => res.status(400).json({ error }));
+            })
+        })
+        .catch(error => res.status(400).json({ error }));
+};
+
+
+
+const createRating = (req, res, next) => {
+    if (0 <= req.body.rating <= 5) {
+        const ratingObject = { ...req.body, grade: req.body.rating };
+        delete ratingObject._id;
+        Book.findOne({_id: req.params.id})
+            .then(book => {
+                const newRatings = book.ratings;
+                const userIdArray = newRatings.map(rating => rating.userId);
+                if (userIdArray.includes(req.auth.userId)) {
+                    res.status(403).json({ message : 'Not authorized' });
+                } else {
+                    newRatings.push(ratingObject);
+                    const grades = newRatings.map(rating => rating.grade);
+                    const averageGrades = average.average(grades);
+                    book.averageRating = averageGrades;
+                    Book.updateOne({ _id: req.params.id }, { ratings: newRatings, averageRating: averageGrades, _id: req.params.id })
+                        .then(() => { res.status(201).json()})
+                        .catch(error => { res.status(400).json( { error })});
+                    res.status(200).json(book);
+                }
+            })
+            .catch((error) => {
+                res.status(404).json({ error });
+            });
+    } else {
+        res.status(400).json({ message: 'The rating must be between 1 and 5.' });
     }
-
-    const userIdFromToken = req.auth.userId;
-
-    Book.findById(id)
-        .then(book => {
-            if (!book) {
-                return res.status(404).json({ error: "Book not found" });
-            }
-            if (book.userId !== userIdFromToken) {
-                return res.status(403).json({ error: "Unauthorized request" });
-            }
-            return Book.findByIdAndUpdate(id, bookToUpdate, { new: true });
-        })
-        .then(updatedBook => {
-            if (!updatedBook) {
-                return res.status(404).json({ error: "Book not found" });
-            }
-            res.status(200).json(updatedBook);
-        })
-        .catch(error => res.status(400).json({ error }));
-};
-const deleteBook = (req, res) => {
-    const { id } = req.params;
-    const userIdFromToken = req.auth.userId;
-
-    Book.findById(id)
-        .then(book => {
-            if (!book) {
-                return res.status(404).json({ error: "Book not found" });
-            }
-            if (book.userId !== userIdFromToken) {
-                return res.status(403).json({ error: "Unauthorized request" });
-            }
-            return Book.findByIdAndDelete(id);
-        })
-        .then(deletedBook => {
-            if (!deletedBook) {
-                return res.status(404).json({ error: "Book not found" });
-            }
-            res.status(200).json({ message: "Book deleted successfully" });
-        })
-        .catch(error => res.status(400).json({ error }));
 };
 
+
+const getBestRating = (req, res, next) => {
+    Book.find().sort({averageRating: -1}).limit(3)
+        .then((books)=>res.status(200).json(books))
+        .catch((error)=>res.status(404).json({ error }));
+};
 module.exports = {
     getBooks,
     createBook,
-    getBestRatedBooks,
     getBookById,
-    updateBook,
-    deleteBook
+    updateBookById,
+    deleteBookById,
+    createRating,
+    getBestRating
 }
